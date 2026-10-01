@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Products{% endblock %}
+{% block content %}
+<h1>Products</h1>
+<table>
+  <thead><tr><th>Product</th><th>Price</th><th>In stock</th></tr></thead>
+  <tbody>
+  {% for p in products %}
+    <tr>
+      <td><a href="/product/{{ p.sku }}">{{ p.name }}</a></td>
+      <td>{{ p.price_cents | money }}</td>
+      <td>{{ p.stock }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

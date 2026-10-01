@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Order #{{ order.id }}{% endblock %}
+{% block content %}
+<h1>Order #{{ order.id }}</h1>
+<p>Status: <strong>{{ order.status }}</strong></p>
+<p>Placed: {{ order.created_at }}</p>
+<p>Ship to: {{ order.ship_address }}</p>
+<table>
+  <thead><tr><th>Product</th><th>Quantity</th><th>Price</th></tr></thead>
+  <tbody>
+  {% for l in lines %}
+    <tr><td>{{ l.name }}</td><td>{{ l.qty }}</td><td>{{ (l.qty * l.price_cents) | money }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p><strong>Total: {{ order.total_cents | money }}</strong></p>
+{% if order.status == "placed" %}
+<form method="post" action="/orders/{{ order.id }}/cancel">
+  <button type="submit">Cancel order</button>
+</form>
+{% endif %}
+<p><a href="/orders">Back to orders</a></p>
+{% endblock %}

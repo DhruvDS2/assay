@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Cart{% endblock %}
+{% block content %}
+<h1>Your cart</h1>
+{% if not items %}
+  <p>Your cart is empty.</p>
+  <p><a href="/">Continue shopping</a></p>
+{% else %}
+<table>
+  <thead><tr><th>Product</th><th>Price</th><th>Quantity</th><th></th></tr></thead>
+  <tbody>
+  {% for i in items %}
+    <tr>
+      <td>{{ i.name }}</td>
+      <td>{{ i.price_cents | money }}</td>
+      <td>
+        <form method="post" action="/cart/update">
+          <input type="hidden" name="sku" value="{{ i.sku }}">
+          <label for="qty-{{ i.sku }}">Quantity for {{ i.name }}</label>
+          <input id="qty-{{ i.sku }}" name="qty" type="number" min="0" value="{{ i.qty }}">
+          <button type="submit">Update</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="/cart/update">
+          <input type="hidden" name="sku" value="{{ i.sku }}">
+          <input type="hidden" name="qty" value="0">
+          <button type="submit">Remove {{ i.name }}</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p><strong>Total: {{ total | money }}</strong></p>
+<p><a href="/checkout">Proceed to checkout</a></p>
+<form method="post" action="/cart/clear"><button type="submit">Empty cart</button></form>
+{% endif %}
+{% endblock %}

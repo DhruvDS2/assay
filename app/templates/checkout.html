@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Checkout{% endblock %}
+{% block content %}
+<h1>Checkout</h1>
+<table>
+  <thead><tr><th>Product</th><th>Quantity</th><th>Price</th></tr></thead>
+  <tbody>
+  {% for i in items %}
+    <tr><td>{{ i.name }}</td><td>{{ i.qty }}</td><td>{{ (i.qty * i.price_cents) | money }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p><strong>Total: {{ total | money }}</strong></p>
+<form method="post" action="/checkout">
+  <label for="ship_address">Shipping address</label>
+  <textarea id="ship_address" name="ship_address" rows="3" cols="40" required></textarea>
+  <p><button type="submit">Place order</button></p>
+</form>
+{% endblock %}

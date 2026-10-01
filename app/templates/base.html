@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}Shop{% endblock %} · Groundtruth Shop</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    nav { display: flex; gap: 1rem; align-items: center; border-bottom: 1px solid #ccc; padding-bottom: .5rem; margin-bottom: 1.5rem; }
+    nav form { margin-left: auto; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border-bottom: 1px solid #eee; padding: .4rem; text-align: left; }
+    .error { color: #b00020; }
+    label { display: block; margin-top: .75rem; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/">Groundtruth Shop</a>
+    {% if user %}
+      <a href="/cart">Cart ({{ cart_count }})</a>
+      <a href="/orders">Orders</a>
+      <form method="post" action="/logout">
+        <span>{{ user.name }}</span>
+        <button type="submit">Log out</button>
+      </form>
+    {% endif %}
+  </nav>
+  <main>{% block content %}{% endblock %}</main>
+</body>
+</html>

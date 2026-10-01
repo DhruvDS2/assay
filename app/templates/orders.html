@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Orders{% endblock %}
+{% block content %}
+<h1>Your orders</h1>
+{% if not orders %}
+  <p>You have no orders yet.</p>
+{% else %}
+<table>
+  <thead><tr><th>Order</th><th>Placed</th><th>Items</th><th>Total</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for o in orders %}
+    <tr>
+      <td><a href="/orders/{{ o.id }}">Order #{{ o.id }}</a></td>
+      <td>{{ o.created_at }}</td>
+      <td>{{ o.n_items }}</td>
+      <td>{{ o.total_cents | money }}</td>
+      <td>{{ o.status }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
