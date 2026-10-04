@@ -1,24 +1,25 @@
 """
-One CLI surface for the whole bench: `python -m bench <command>`.
+One CLI surface for the whole bench: `python -m bench <command> [args...]`.
 
-Every tool in `bench/` already exposes a `main() -> int`; historically each was
-run as its own `python -m bench.<module>`. This dispatcher unifies them behind a
-single argparse entrypoint so there is one discoverable command list, while each
-module's own `python -m bench.<module>` still works unchanged (this only adds a
-front door, it doesn't move the rooms).
+Every tool in `bench/` exposes a `main()`; historically each ran as its own
+`python -m bench.<module>`. This dispatcher unifies them behind a single front door
+and forwards any remaining arguments to the chosen command (so `eval` gets its flags),
+while each module's own `python -m bench.<module>` still works unchanged.
 
-    python -m bench                 # list commands
-    python -m bench selfcheck       # oracle-vs-noop calibration
-    python -m bench gradecompare    # cheap graders scored against SQL truth
+    python -m bench                                  # list commands
+    python -m bench selfcheck                        # oracle-vs-noop calibration
+    python -m bench eval --agent oracle --trials 1   # run + CI gate (args forwarded)
 """
 
 from __future__ import annotations
 
-import argparse
 import importlib
+import inspect
+import sys
 
 # command -> (module exposing main(), one-line help). Order is the help order.
 _COMMANDS: dict[str, tuple[str, str]] = {
+    "eval": ("bench.eval", "run an agent across the matrix and gate on the result (CI surface)"),
     "selfcheck": ("bench.selfcheck", "oracle-vs-noop calibration on every task"),
     "run": ("bench.run", "run the oracle across the task × condition × trial matrix"),
     "gradecompare": ("bench.gradecompare", "score cheap graders (DOM/receipt/screenshot) vs SQL truth"),
@@ -28,21 +29,36 @@ _COMMANDS: dict[str, tuple[str, str]] = {
 }
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="python -m bench",
-        description="Assay bench — own-the-website robustness tooling.",
-    )
-    sub = parser.add_subparsers(dest="command", metavar="<command>")
+def _print_help() -> None:
+    print("usage: python -m bench <command> [args...]\n")
+    print("Assay bench — own-the-website robustness tooling.\n")
+    print("commands:")
+    width = max(len(name) for name in _COMMANDS)
     for name, (_module, help_text) in _COMMANDS.items():
-        sub.add_parser(name, help=help_text)
+        print(f"  {name:<{width}}  {help_text}")
+    print("\nRun 'python -m bench <command> --help' for a command's own options.")
 
-    args = parser.parse_args(argv)
-    if not args.command:
-        parser.print_help()
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or argv[0] in ("-h", "--help"):
+        _print_help()
+        return 0 if argv else 2
+
+    command, rest = argv[0], argv[1:]
+    if command not in _COMMANDS:
+        print(f"unknown command: {command!r}\n")
+        _print_help()
         return 2
 
-    module = importlib.import_module(_COMMANDS[args.command][0])
+    module = importlib.import_module(_COMMANDS[command][0])
+    # Forward args only to commands whose main() accepts them (e.g. eval); the
+    # no-arg tools reject stray flags rather than silently ignoring them.
+    if inspect.signature(module.main).parameters:
+        return module.main(rest)
+    if rest:
+        print(f"'{command}' takes no options, got: {' '.join(rest)}")
+        return 2
     return module.main()
 
 
