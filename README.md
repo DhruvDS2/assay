@@ -183,6 +183,20 @@ Clicking through it yourself is the best way to see exactly what an agent sees.
 
 ---
 
+## CLI & CI
+
+One command runs an agent through the bench and gates on the SQL-truth result:
+
+```bash
+python -m bench eval --agent oracle --conditions seven --trials 1 --min-pass-rate 1.0
+```
+
+Point `--agent` at a built-in (`oracle` / `hardened` / `llm`) or your own agent via a
+`module:factory` entrypoint, and drop the reusable `DhruvDS2/assay@main` GitHub Action into
+your CI to fail a build when your agent regresses. Full guide: **[docs/ci.md](docs/ci.md)**.
+
+---
+
 ## Repo layout
 
 ```
