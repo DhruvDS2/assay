@@ -22,6 +22,7 @@ wasn't — the error that silently inflates agent scores everywhere else.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol
 
@@ -37,6 +38,7 @@ class Verdict:
     grader: str
     passed: bool
     detail: str = ""
+    abstained: bool = False     # grader has no opinion here (e.g. out of its domain)
 
 
 class Grader(Protocol):
@@ -56,8 +58,6 @@ def render_state(case: Case, mutations: tuple[str, ...] = ()) -> dict[str, str]:
     `mutations` serves the same perturbed app the agent saw, so a screenshot judge
     is scored on the page it would actually have been handed, not a clean one.
     """
-    import re
-
     from fastapi.testclient import TestClient
 
     from app.mutations import create_mutated_app
@@ -99,8 +99,12 @@ def _dom_buy_blue_shirt(s):
 
 
 def _dom_buy_socks_x3(s):
+    # Read the quantity next to the line item, not a bare "3" anywhere on the page:
+    # the order detail prints a wall-clock timestamp, so a substring match on "3"
+    # was nondeterministic (it passed whenever the clock happened to contain a 3).
     d = s.get("/orders/latest", "")
-    ok = "wool socks" in d and "3" in d and "placed" in d
+    m = re.search(r"wool socks\s+(\d+)", d)
+    ok = bool(m) and m.group(1) == "3" and "placed" in d
     return ok, "order page shows 3 wool socks" if ok else "3 wool socks not shown"
 
 
@@ -233,6 +237,8 @@ def false_success_rate(rows: list[list[Verdict]]) -> dict[str, GraderScore]:
             continue
         for v in row:
             if v.grader == "sql":
+                continue
+            if v.abstained:                 # no opinion → not scored for or against
                 continue
             s = scores.setdefault(v.grader, {"total": 0, "agree": 0, "fs": 0, "ff": 0})
             s["total"] += 1
