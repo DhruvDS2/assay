@@ -1,0 +1,60 @@
+name: "Assay agent eval"
+description: "Run the Assay eval harness against an agent and gate a build on the SQL-truth result."
+branding:
+  icon: "check-circle"
+  color: "green"
+
+inputs:
+  agent:
+    description: "Agent spec: a built-in (oracle|hardened|llm) or a 'module:factory' entrypoint."
+    required: false
+    default: "oracle"
+  conditions:
+    description: "Condition set: clean | seven | faults."
+    required: false
+    default: "seven"
+  trials:
+    description: "Trials per cell."
+    required: false
+    default: "1"
+  tasks:
+    description: "Comma-separated task ids (empty = all)."
+    required: false
+    default: ""
+  min-pass-rate:
+    description: "Fail the build if passed/planned is below this (0..1)."
+    required: false
+    default: "1.0"
+  report:
+    description: "Path to write the HTML report."
+    required: false
+    default: "runs/report.html"
+  python-version:
+    description: "Python used to run the harness."
+    required: false
+    default: "3.12"
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    # Install Assay from this action's own checkout, so the action is self-contained
+    # when used as `uses: DhruvDS2/assay@main` from any repo. To eval your OWN agent,
+    # `pip install` your package in an earlier step and pass agent: "mypkg:factory".
+    - name: Install Assay
+      shell: bash
+      run: pip install -e "${{ github.action_path }}[dev]"
+
+    - name: Run eval + gate
+      shell: bash
+      run: >
+        python -m bench eval
+        --agent "${{ inputs.agent }}"
+        --conditions "${{ inputs.conditions }}"
+        --trials "${{ inputs.trials }}"
+        ${{ inputs.tasks && format('--tasks "{0}"', inputs.tasks) || '' }}
+        --min-pass-rate "${{ inputs.min-pass-rate }}"
+        --report "${{ inputs.report }}"
