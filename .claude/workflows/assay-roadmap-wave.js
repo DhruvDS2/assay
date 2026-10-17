@@ -8,58 +8,36 @@ export const meta = {
 }
 
 // ---------------------------------------------------------------------------
-// The codified version of the 2026-10-04 Orca wave. Today it was coordinated by
-// hand (coordinator decides the split, human approves, workers run, coordinator
-// verifies). This script freezes that pathway so it is deterministic and
-// reviewable as code: same WORK list -> same plan, every run.
+// The codified version of the hand-coordinated Orca wave: coordinator decides
+// the split, human approves, workers run on DISJOINT NEW files, coordinator
+// verifies by the real suite. This script freezes that pathway deterministically.
 //
 // THE ONE INVARIANT that makes parallelism safe here: every item owns DISJOINT
 // NEW files and touches no existing module. That is what lets the workers share
 // one working tree. If a future item must edit a shared file, give it
-// `isolation: 'worktree'` instead (a knob below), or sequence it in its own run.
+// `isolation: 'worktree'` instead, or sequence it in its own run.
 //
-// "Expand later" = append an entry to WORK. Nothing else changes.
-// Run with:  Workflow({ name: 'assay-roadmap-wave' })   (re-runs the builders)
-//            or edit WORK first to point at the NEXT increment.
+// HOW TO DRIVE IT (args-first — the increments are DATA, passed in):
+//   Workflow({ name: 'assay-roadmap-wave', args: [
+//     { label: '...', files: ['bench/x.py','tests/test_x.py'],
+//       expectModified: ['bench/__init__.py'],   // optional: known pre-existing edits, not regressions
+//       spec: `...worker instructions...` },
+//     ...
+//   ] })
+// A bare `Workflow({ name: 'assay-roadmap-wave' })` falls back to DEFAULT_WORK
+// below; DEFAULT_WORK is intentionally EMPTY so a no-arg run is a loud no-op,
+// never a silent re-build of already-landed increments (the 2026-10-16 gotcha).
+// Append completed waves to DONE_LOG for the audit trail; don't re-queue them.
 // ---------------------------------------------------------------------------
 
-const WORK = [
-  {
-    label: 'B2-customer-config',
-    files: ['bench/customer.py', 'tests/test_customer.py'],
-    spec: `Assay B2 — customer config layer. Prove the harness is NOT welded to our shop:
-let a customer declare their OWN tasks + SQL checks against their OWN schema, with their own
-seed/reset. Create ONLY bench/customer.py + tests/test_customer.py; edit no existing file.
-Reuse bench.model (Check/CheckResult/Grade) READ-ONLY; import nothing from app/ so generality
-holds at import time. Ship ONE worked example in a different domain than the shop (e.g. SaaS
-billing: accounts + subscriptions). Enforce the CLAUDE.md calibration discipline: oracle passes
-all checks, noop fails a named check, and the most plausible wrong agent fails a SPECIFIC named
-side-effect check (baseline-keyed). Run only: python -m pytest tests/test_customer.py -q.`,
-  },
-  {
-    label: 'B3-confidence-bands',
-    files: ['bench/confidence.py', 'tests/test_confidence.py'],
-    spec: `Assay B3 — grader confidence bands. Turn v2's false-success point counts into Wilson
-score intervals. Create ONLY bench/confidence.py + tests/test_confidence.py; edit no existing
-file. Pure stdlib (math + statistics.NormalDist, no numpy/scipy). Provide wilson_interval,
-a ConfidenceBand dataclass, band(successes,total,confidence=0.95), and false_success_band(score)
-reading a bench.graders.GraderScore READ-ONLY. Correct at the extremes (0/n, n/n, total=0).
-Document why Wilson beats normal-approx. Tests assert hand-computed bounds + monotonicity.
-Run only: python -m pytest tests/test_confidence.py -q.`,
-  },
-  {
-    label: 'B3-receipt-grader',
-    files: ['bench/receipt_grader.py', 'tests/test_receipt_grader.py'],
-    spec: `Assay B3 — receipt grader. A non-SQL grader that parses /orders/latest into a structured
-receipt (items, quantities, ship address, status) and judges against the task's expected receipt
-— stronger than the DOM keyword scrape, so it catches a wrong QUANTITY. Create ONLY
-bench/receipt_grader.py + tests/test_receipt_grader.py; edit no existing file. Import Verdict +
-the Grader protocol from bench.graders READ-ONLY. Per-task checks for the 3 purchase tasks
-(mirror _DOM_CHECKS). Document the screen-grader blind spot (can't see a side-effect order vs
-baseline — SQL's job). Tests: correct buy passes, wrong-item fails, socks x1 fails / x3 passes.
-Run only: python -m pytest tests/test_receipt_grader.py -q.`,
-  },
-]
+// Landed waves (audit trail — do NOT put these back in WORK; they already exist):
+//   2026-10-04  B2-customer-config, B3-confidence-bands, B3-receipt-grader
+//   2026-10-16  A2-measured (bench/a2_measure.py), A3-site-memory (bench/sitegraph.py),
+//               B3-review-queue (bench/review_queue.py)
+const DEFAULT_WORK = []
+
+// `args` is the queue of increments to build this run. Each: {label, files[], spec, expectModified?[]}.
+const WORK = Array.isArray(args) && args.length ? args : DEFAULT_WORK
 
 const BUILD_SCHEMA = {
   type: 'object',
@@ -74,6 +52,11 @@ const BUILD_SCHEMA = {
 }
 
 phase('Build')
+if (!WORK.length) {
+  log('no increments queued: pass args=[{label, files, spec}, ...] to build a wave. DEFAULT_WORK is empty by design.')
+  return { built: [], verify: null, note: 'no-op: no increments passed' }
+}
+
 // Disjoint files -> safe to share the working tree. Flip to isolation:'worktree'
 // per item only if it must touch a shared file.
 const built = await parallel(
@@ -91,6 +74,8 @@ log(`built ${landed.length}/${WORK.length}; self-reported passing: ${landed.filt
 phase('Verify')
 // The workers do NOT grade their own homework. This is the external gate: the real
 // suite + calibration over everything that landed, which is the only thing we trust.
+const expectedNewFiles = WORK.flatMap((w) => w.files || [])
+const expectModified = WORK.flatMap((w) => w.expectModified || [])
 const VERIFY_SCHEMA = {
   type: 'object',
   properties: {
@@ -107,10 +92,14 @@ const verdict = await agent(
   `Independently verify the Assay repo after the parallel build above. In the repo root:
   1. Run: source .venv/bin/activate && python -m pytest -q   — record passed/failed counts.
   2. Run: python -m bench.selfcheck   — record whether it prints "calibrated".
-  3. Run: git status --short   — flag any MODIFIED existing file (workers should only ADD new files;
-     a modified existing file other than a known prior change is a red flag / possible conflict).
+  3. Confirm the NEW files for this wave actually landed (a worker that reported "already exists"
+     without writing is a FAIL): ${JSON.stringify(expectedNewFiles)}.
+  4. Run: git status --short   — workers should only ADD new files. These existing files are
+     KNOWN-EXPECTED edits for this wave, NOT regressions: ${JSON.stringify(expectModified)}.
+     Any OTHER modified tracked file is a red flag / possible conflict.
   Return the structured verdict. 'accept' only if pytest has 0 failures AND selfcheck is calibrated
-  AND no unexpected existing file was modified; otherwise 'reject' with the regressions listed.`,
+  AND every expected new file exists AND no unexpected existing file was modified; else 'reject'
+  with the regressions listed.`,
   { label: 'verify-suite', phase: 'Verify', schema: VERIFY_SCHEMA }
 )
 
