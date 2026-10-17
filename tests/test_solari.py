@@ -12,7 +12,7 @@ Two things to prove:
 from __future__ import annotations
 
 import asyncio
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
@@ -29,24 +29,32 @@ from bench.tasks import TASKS
 # --------------------------------------------------------------- SolariBrowser
 
 class _FakeLocator:
-    def __init__(self, page, label):
-        self._page, self._label = page, label
+    def __init__(self, page, role, label, present):
+        self._page, self._role, self._label, self._present = page, role, label, present
 
     @property
     def first(self):
         return self
 
+    async def count(self):
+        return 1 if self._present else 0
+
     async def click(self):
-        self._page.calls.append(("click_text", self._label))
+        self._page.calls.append((f"click_{self._role}", self._label))
 
 
 class _FakePage:
-    """Records the Playwright calls SolariBrowser makes; stands in for a cloud page."""
+    """Records the Playwright calls SolariBrowser makes; stands in for a cloud page.
 
-    def __init__(self, *, html="<html></html>", fill_raises=False):
+    `roles` says which (role, label) pairs resolve to a real interactive element — so a
+    submit button named "Place order" is present but there's no link of that name, which
+    is how SolariBrowser decides link-vs-button."""
+
+    def __init__(self, *, html="<html></html>", fill_raises=False, roles=None):
         self.url = "http://shop/"
         self._html = html
         self._fill_raises = fill_raises
+        self._roles = roles or set()        # e.g. {("button", "Place order")}
         self.calls: list[tuple] = []
 
     async def goto(self, url, wait_until=None):
@@ -64,8 +72,8 @@ class _FakePage:
     async def click(self, selector):
         self.calls.append(("click_css", selector))
 
-    def get_by_text(self, label):
-        return _FakeLocator(self, label)
+    def get_by_role(self, role, name, exact=False):
+        return _FakeLocator(self, role, name, (role, name) in self._roles)
 
 
 def _run(coro):
@@ -101,11 +109,20 @@ def test_fill_failure_is_an_agent_mistake_not_infra():
         _run(b.fill("#nope", "x"))
 
 
-def test_click_text_matches_a_link_or_button():
-    page = _FakePage()
+def test_click_text_falls_back_to_a_button_when_no_link():
+    # A submit button named "Place order", no link — must click the button, never a heading.
+    page = _FakePage(roles={("button", "Place order")})
     b = SolariBrowser(page, "https://p/")
     _run(b.click("text=Place order"))
-    assert ("click_text", "Place order") in page.calls
+    assert ("click_button", "Place order") in page.calls
+
+
+def test_click_text_prefers_a_link_over_a_button():
+    page = _FakePage(roles={("link", "Orders"), ("button", "Orders")})
+    b = SolariBrowser(page, "https://p/")
+    _run(b.click("text=Orders"))
+    assert ("click_link", "Orders") in page.calls
+    assert ("click_button", "Orders") not in page.calls
 
 
 def test_click_bare_path_is_a_navigation():
@@ -157,8 +174,8 @@ class _FakeSolari:
         self.closed = False
         self._browser_raises = browser_raises
 
-    @contextmanager
-    def serve(self, db_path, *, secret_key, mutations=(), faults=()):
+    @asynccontextmanager
+    async def serve(self, db_path, *, secret_key, mutations=(), faults=()):
         self.served_db = Path(db_path)
         self.secret_key = secret_key
         self.mutations = mutations
@@ -167,8 +184,8 @@ class _FakeSolari:
         finally:
             self.killed = True                # VM torn down (db is already local)
 
-    @contextmanager
-    def open(self, base_url):
+    @asynccontextmanager
+    async def open(self, base_url):
         assert base_url == "http://fake-shop"  # the agent is driven at the served URL
         browser = TestClientBrowser(create_app(self.served_db))
         if self._browser_raises:
