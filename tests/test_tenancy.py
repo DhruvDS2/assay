@@ -153,6 +153,39 @@ def test_api_rejects_a_bad_payload(tmp_path):
     assert r.status_code == 400
 
 
+def test_eval_run_payload_lands_on_the_dashboard(tmp_path):
+    """The C1->C3 loop, end to end (keyless): a real oracle eval -> build_run_payload ->
+    POST /api/runs -> the run shows on the dashboard and its B1 report is served."""
+    import asyncio
+    import tempfile
+
+    from bench.adapter import resolve_agent
+    from bench.eval import build_run_payload
+    from bench.run import CLEAN, run_matrix
+    from bench.tasks import TASKS
+
+    task = next(t for t in TASKS if t.id == "empty_cart")
+    with tempfile.TemporaryDirectory() as root:
+        summary, _ = asyncio.run(
+            run_matrix((task,), (CLEAN,), 1, root=root, run_fn=resolve_agent("oracle"))
+        )
+    payload = build_run_payload(summary, agent="oracle", conditions="clean", trials=1)
+    assert payload["planned"] == 1 and payload["passed"] == 1 and "<" in payload["report_html"]
+
+    store = _store(tmp_path)
+    _, key = store.create_tenant("acme", "Acme", "ops@acme.com", "pw")
+    client = _client(store)
+
+    posted = client.post("/api/runs", headers={"X-API-Key": key}, json=payload)
+    assert posted.status_code == 201
+    run_id = posted.json()["run_id"]
+
+    client.post("/login", data={"email": "ops@acme.com", "password": "pw"})
+    assert "1/1" in client.get("/").text                       # headline on the dashboard
+    report = client.get(f"/runs/{run_id}")
+    assert report.status_code == 200 and "empty_cart" in report.text   # the B1 report
+
+
 def test_logout_clears_the_session(tmp_path):
     store = _store(tmp_path)
     store.create_tenant("acme", "Acme", "ops@acme.com", "pw")

@@ -14,6 +14,12 @@ loud here).
 
     python -m bench eval --agent oracle --conditions seven --trials 1 --min-pass-rate 1.0
     python -m bench eval --agent mypkg:make_agent --report runs/report.html --json
+    python -m bench eval --agent llm --push-url http://127.0.0.1:8080 --push-key ak_...
+
+The last form closes the C1->C3 loop: after the run, it POSTs the summary + the B1
+report to a tenant's dashboard (`bench.tenancy`) so a CI eval lands where the customer
+watches it. Pushing is a side effect — a push failure is reported but never changes the
+gate exit code (the gate is about the agent, not the upload).
 """
 
 from __future__ import annotations
@@ -60,6 +66,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--allow-skips", action="store_true",
                    help="do not fail the build on infra-skipped cells")
     p.add_argument("--json", action="store_true", help="emit a machine-readable summary")
+    p.add_argument("--push-url", default=None,
+                   help="dashboard base URL to POST this run to (e.g. http://127.0.0.1:8080)")
+    p.add_argument("--push-key", default=None, help="tenant API key for --push-url")
     return p
 
 
@@ -96,6 +105,38 @@ def _summary_dict(summary, args, gate_ok, reasons) -> dict:
     }
 
 
+def build_run_payload(summary, *, agent: str, conditions: str, trials: int) -> dict:
+    """The /api/runs body for one eval: headline numbers + the self-contained B1 report.
+    Pure (no network) so the eval->dashboard contract is unit-testable."""
+    from bench.report import render_report
+
+    return {
+        "agent": agent,
+        "conditions": conditions,
+        "trials": trials,
+        "planned": summary.planned,
+        "passed": summary.passed,
+        "report_html": render_report(
+            summary, title="Assay — agent eval",
+            subtitle=f"agent={agent} · conditions={conditions} · trials={trials}"),
+    }
+
+
+def _push(summary, args) -> tuple[bool, str]:
+    import httpx
+
+    payload = build_run_payload(summary, agent=args.agent,
+                                conditions=args.conditions, trials=args.trials)
+    url = args.push_url.rstrip("/") + "/api/runs"
+    try:
+        r = httpx.post(url, headers={"X-API-Key": args.push_key or ""}, json=payload, timeout=30.0)
+    except Exception as e:
+        return False, f"push failed: {e}"
+    if r.status_code == 201:
+        return True, f"pushed run #{r.json().get('run_id')} to {args.push_url}"
+    return False, f"push rejected: HTTP {r.status_code} {r.text[:150]}"
+
+
 def main(argv: list[str] | None = None) -> int:
     from bench.adapter import resolve_agent
     from bench.run import run_matrix
@@ -119,14 +160,25 @@ def main(argv: list[str] | None = None) -> int:
                      title="Assay — agent eval",
                      subtitle=f"agent={args.agent} · conditions={args.conditions} · trials={args.trials}")
 
+    push_msg = None
+    if args.push_url:
+        if not args.push_key:
+            raise SystemExit("--push-url requires --push-key")
+        _, push_msg = _push(summary, args)
+
     if args.json:
-        print(json.dumps(_summary_dict(summary, args, gate_ok, reasons), indent=2))
+        out = _summary_dict(summary, args, gate_ok, reasons)
+        if push_msg is not None:
+            out["push"] = push_msg
+        print(json.dumps(out, indent=2))
     else:
         print(summary.format())
         print()
         print(f"agent={args.agent}  conditions={args.conditions}  trials={args.trials}")
         if args.report:
             print(f"report: {args.report}")
+        if push_msg is not None:
+            print(push_msg)
         print("GATE: PASS" if gate_ok else "GATE: FAIL — " + "; ".join(reasons))
 
     return 0 if gate_ok else 1
