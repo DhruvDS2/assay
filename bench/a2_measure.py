@@ -129,6 +129,21 @@ def hardened_llm_policy_for(
     )
 
 
+def hardened_llm_run_fn(*, model: str = "claude-opus-4-8"):
+    """A `bench.run.RunFn` for the eval CLI: the hardened real-brain agent across the
+    mutation matrix — A2 measured on the SAME axis as the A1 baseline, so the two are
+    directly comparable. `policy_run_fn` drives it against each cell's mutated shop; a
+    fresh hardened policy per case picks up that task's TaskModel (purchase tasks get
+    verify-before-stop; cancel/empty fall back to a bare LLMPolicy — see HARDENED_MODELS).
+
+    Keyless to construct; acquires the model client lazily on first `decide`. Point the
+    CLI at it:  python -m bench eval --agent bench.a2_measure:hardened_llm_run_fn
+    """
+    from bench.adapter import policy_run_fn
+
+    return policy_run_fn(lambda case: hardened_llm_policy_for(case.task, llm_model=model))
+
+
 # ------------------------------------------------------------------ the A/B measurement
 
 

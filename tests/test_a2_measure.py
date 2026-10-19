@@ -246,3 +246,18 @@ def test_hardened_lifts_the_drop_cell_to_zero_through_the_engine(seed, tmp_path)
         assert by[(task.id, "clean")].passed == 1                 # baseline holds
         assert by[(task.id, DROP_COND_NAME)].passed == 1          # recovered, not doubled
     assert summary.skipped == 0
+
+
+def test_hardened_llm_run_fn_resolves_through_the_cli_keyless():
+    """The eval CLI entrypoint for the hardened real-brain agent builds without a key
+    (the model client is acquired lazily at decide time, not here)."""
+    import inspect
+
+    from bench.adapter import resolve_agent
+    from bench.a2_measure import hardened_llm_run_fn
+
+    run_fn = resolve_agent("bench.a2_measure:hardened_llm_run_fn")
+    assert callable(run_fn)
+    # the agent-loop RunFn is async (the engine awaits it), unlike the sync oracle
+    assert inspect.iscoroutinefunction(run_fn)
+    assert callable(hardened_llm_run_fn())
