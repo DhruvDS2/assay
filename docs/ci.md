@@ -38,6 +38,8 @@ gate, **1** when it doesn't.
 | `--min-pass-rate` | – | fail if `passed/planned` is below this (0..1) |
 | `--allow-skips` | off | don't fail the build on infra-skipped cells |
 | `--json` | off | machine-readable summary |
+| `--push-url` | – | POST the run (summary + report) to a tenant dashboard (`bench.tenancy`) |
+| `--push-key` | – | tenant API key for `--push-url` (required with it) |
 
 ```bash
 # Gate: the oracle must sweep the matrix (harness sanity check).
@@ -98,7 +100,12 @@ jobs:
           conditions: "seven"
           trials: "3"
           min-pass-rate: "0.8"
+          push-url: "https://assay.example.com"      # optional: land the run on your dashboard
+          push-key: ${{ secrets.ASSAY_API_KEY }}     # tenant API key, via a repo secret
 ```
 
 The action installs Assay from its own checkout and runs the eval gate; the build fails when
-your agent drops below `min-pass-rate`. See [`action.yml`](../action.yml) for all inputs.
+your agent drops below `min-pass-rate`. With `push-url` + `push-key` set, the run (summary +
+report) is POSTed to a tenant dashboard (`bench.tenancy`) so the CI result lands where the
+customer watches it — the loop closed. Pushing never changes the gate exit code. See
+[`action.yml`](../action.yml) for all inputs.

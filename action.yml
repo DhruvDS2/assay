@@ -29,6 +29,14 @@ inputs:
     description: "Path to write the HTML report."
     required: false
     default: "runs/report.html"
+  push-url:
+    description: "Optional: a dashboard base URL to POST this run to (e.g. https://assay.example.com). Closes the loop so a CI eval lands on the tenant dashboard."
+    required: false
+    default: ""
+  push-key:
+    description: "Tenant API key for push-url. Pass via a secret: push-key: ${{ secrets.ASSAY_API_KEY }}."
+    required: false
+    default: ""
   python-version:
     description: "Python used to run the harness."
     required: false
@@ -58,3 +66,4 @@ runs:
         ${{ inputs.tasks && format('--tasks "{0}"', inputs.tasks) || '' }}
         --min-pass-rate "${{ inputs.min-pass-rate }}"
         --report "${{ inputs.report }}"
+        ${{ inputs.push-url && format('--push-url "{0}" --push-key "{1}"', inputs.push-url, inputs.push-key) || '' }}
